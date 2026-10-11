@@ -1,0 +1,555 @@
+---
+openapi: 3.0.3
+info:
+  title: 二人向け番組推薦 API
+  version: 0.1.0
+  description: system-design.mdの整理版。未確定部分はsystem-design-organized.mdの設計案を参照。Swagger
+    UIで読み込み可能。
+servers:
+- url: "/"
+security:
+- sessionAuth: []
+paths:
+  "/rooms":
+    post:
+      operationId: createRoom
+      summary: ルームを作成し作成者を参加させる
+      tags:
+      - Rooms
+      responses:
+        '201':
+          description: 作成成功。statusはwaiting。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RoomJoined"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '409':
+          "$ref": "#/components/responses/Error409"
+        '415':
+          "$ref": "#/components/responses/Error415"
+      description: ユーザーはログインセッションから取得する。同名ルームは409 ROOM_NAME_ALREADY_EXISTS。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/RoomCredentials"
+  "/rooms/join":
+    post:
+      operationId: joinRoom
+      summary: ルーム名とパスワードで参加する
+      tags:
+      - Rooms
+      responses:
+        '200':
+          description: 参加成功。二人そろえばstatusはready。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RoomJoined"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '409':
+          "$ref": "#/components/responses/Error409"
+        '415':
+          "$ref": "#/components/responses/Error415"
+      description: 同じ参加者の再参加は200。既に別の二人が参加している場合は409 ROOM_FULL。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/RoomCredentials"
+  "/rooms/{room_id}/members/{user_id}/viewing-history":
+    parameters:
+    - name: room_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    - name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    get:
+      operationId: getViewingHistory
+      summary: 参加者の視聴履歴を番組単位で取得する
+      tags:
+      - Viewing history
+      responses:
+        '200':
+          description: 番組ID昇順。重複する番組はまとめる。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ViewingHistory"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '404':
+          "$ref": "#/components/responses/Error404"
+      description: 参加者は双方の履歴を取得できる。カーソルはルーム・対象ユーザーにひも付く不透明な値。末尾はnext_cursor=null、has_more=false。
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: cursor
+        in: query
+        schema:
+          type: string
+    put:
+      operationId: submitViewingHistory
+      summary: 自分の推薦入力を全件置換する
+      tags:
+      - Recommendations
+      responses:
+        '200':
+          description: 相手の送信待ち。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Submission"
+        '202':
+          description: 二人分の送信がそろい推薦計算を開始。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Submission"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '409':
+          "$ref": "#/components/responses/Error409"
+        '415':
+          "$ref": "#/components/responses/Error415"
+        '422':
+          "$ref": "#/components/responses/Error422"
+      description: user_idはログインユーザー自身のみ。他者を指定した場合は404 ROOM_NOT_FOUND。空配列は入力不足としてready=falseに戻す。計算中は409
+        RECOMMENDATION_IN_PROGRESS。同じ選択の再送は再計算しない。 ただしfailed状態では同じ選択の再送も再試行する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/Selection"
+  "/rooms/{room_id}/preference":
+    parameters:
+    - name: room_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    post:
+      operationId: changePreference
+      summary: 二人の好みの重みを変更する
+      tags:
+      - Recommendations
+      responses:
+        '200':
+          description: 重みの保存成功。再計算の結果はWebSocketで通知。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PreferenceResult"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '409':
+          "$ref": "#/components/responses/Error409"
+        '415':
+          "$ref": "#/components/responses/Error415"
+      description: weightは作成者への重み。0は相手寄り、1は作成者寄り。範囲外は400 INVALID_WEIGHT。二人未参加は409
+        ROOM_NOT_READY。計算中は409 RECOMMENDATION_IN_PROGRESS。二人ともreadyなら再計算する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/Preference"
+  "/rooms/{room_id}/members/{user_id}":
+    parameters:
+    - name: room_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    - name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    delete:
+      operationId: leaveRoom
+      summary: 自分がルームから退出する
+      tags:
+      - Rooms
+      responses:
+        '204':
+          description: 退出成功。レスポンスボディなし。
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '404':
+          "$ref": "#/components/responses/Error404"
+      description: 自分のみ退出できる。選択と最新結果を無効化し、残る参加者に通知する。作成者が退出した場合は残る参加者を作成者に引き継ぎ、重みを0.5に戻す。最後の参加者が退出したらルームを削除する。
+  "/rooms/{room_id}/ws":
+    parameters:
+    - name: room_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
+    get:
+      operationId: connectRoomWebSocket
+      summary: ルーム更新通知のWebSocket接続
+      tags:
+      - Events
+      responses:
+        '101':
+          description: WebSocketへ切り替え。以降はJSONのテキストメッセージ。
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '404':
+          "$ref": "#/components/responses/Error404"
+      description: ログインセッションで認証する。接続直後にroom.updatedを送信し、completed/failedなら最新結果/失敗情報も送信する。切断中のイベントは再送しない。業務メッセージはHTTPで送信する。
+    x-websocket-events:
+    - "$ref": "#/components/schemas/RoomUpdatedEvent"
+    - "$ref": "#/components/schemas/RecommendationCompletedEvent"
+    - "$ref": "#/components/schemas/RecommendationFailedEvent"
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: 既存ログインセッションを利用する案。Cookie名・ログイン方式は未確定。
+  schemas:
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    Series:
+      type: object
+      required:
+      - series_id
+      - series_title
+      properties:
+        series_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        series_title:
+          type: string
+    Selection:
+      type: object
+      required:
+      - included_series_ids
+      properties:
+        included_series_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+    Submission:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - waiting_for_partner
+          - processing
+    RoomCredentials:
+      type: object
+      required:
+      - room_name
+      - password
+      properties:
+        room_name:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          format: password
+          minLength: 1
+    RoomJoined:
+      type: object
+      required:
+      - room_id
+      - status
+      properties:
+        room_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          enum:
+          - waiting
+          - ready
+    Preference:
+      type: object
+      required:
+      - weight
+      properties:
+        weight:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+    PreferenceResult:
+      type: object
+      required:
+      - status
+      - weight
+      properties:
+        status:
+          type: string
+          enum:
+          - SUCCESS
+        weight:
+          type: number
+          minimum: 0
+          maximum: 1
+    ViewingHistory:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Series"
+        pagination:
+          type: object
+          required:
+          - next_cursor
+          - has_more
+          properties:
+            next_cursor:
+              type: string
+              nullable: true
+            has_more:
+              type: boolean
+    RoomState:
+      type: object
+      required:
+      - room_id
+      - members
+      - status
+      properties:
+        room_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        members:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required:
+            - user_id
+            - ready
+            properties:
+              user_id:
+                type: string
+                minLength: 1
+                maxLength: 64
+              ready:
+                type: boolean
+        status:
+          type: string
+          enum:
+          - waiting_for_partner
+          - processing
+          - completed
+          - failed
+    Recommendation:
+      type: object
+      required:
+      - room_id
+      - items
+      properties:
+        room_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        items:
+          type: array
+          maxItems: 10
+          items:
+            "$ref": "#/components/schemas/Series"
+    RecommendationFailure:
+      type: object
+      required:
+      - room_id
+      - error
+      properties:
+        room_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    RoomUpdatedEvent:
+      type: object
+      required:
+      - type
+      - data
+      properties:
+        type:
+          type: string
+          enum:
+          - room.updated
+        data:
+          "$ref": "#/components/schemas/RoomState"
+    RecommendationCompletedEvent:
+      type: object
+      required:
+      - type
+      - data
+      properties:
+        type:
+          type: string
+          enum:
+          - recommendation.completed
+        data:
+          "$ref": "#/components/schemas/Recommendation"
+    RecommendationFailedEvent:
+      type: object
+      required:
+      - type
+      - data
+      properties:
+        type:
+          type: string
+          enum:
+          - recommendation.failed
+        data:
+          "$ref": "#/components/schemas/RecommendationFailure"
+  responses:
+    Error400:
+      description: INVALID_REQUEST：JSON・型・入力値が不正。INVALID_ROOM_NAME / INVALID_PASSWORD
+        / INVALID_WEIGHTは各操作で使用。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error401:
+      description: UNAUTHENTICATED：ログインセッションが無効。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error403:
+      description: INCORRECT_PASSWORD：参加時のパスワード不一致。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error404:
+      description: ROOM_NOT_FOUND：ルーム不存在、実行者が非参加者、または対象ユーザーが非参加者。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error409:
+      description: ROOM_FULL / ROOM_NOT_READY / ROOM_NAME_ALREADY_EXISTS / RECOMMENDATION_IN_PROGRESS：各操作の競合。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error415:
+      description: UNSUPPORTED_MEDIA_TYPE：application/json以外。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error422:
+      description: INVALID_SERIES_SELECTION：自分の視聴履歴にない番組を指定。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    Error500:
+      description: INTERNAL_ERROR：内部の詳細は返さない。
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
