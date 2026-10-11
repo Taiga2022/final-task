@@ -1,0 +1,6 @@
+[tools]
+go = "1.27.1"
+gomigrate = "4.20.1"
+
+[env]
+_.file = ".env"
