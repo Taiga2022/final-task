@@ -14,6 +14,10 @@ run = "migrate -path migrations/ -database \"$DATABASE_URL\" up"
 description = "Rollback database migration"
 run = "migrate -path migrations/ -database \"$DATABASE_URL\" down 1"
 
+[tasks.seed]
+description = "Import viewing histories from CSV"
+run = "go run ./cmd/seed"
+
 [tasks.dev]
 description = "Start Echo server"
 run = "go run ./cmd/api"
