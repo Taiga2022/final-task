@@ -2,5 +2,21 @@
 go = "1.27.1"
 gomigrate = "4.20.1"
 
+[tasks.db-up]
+description = "Run database up"
+run = "docker compose up -d --wait db"
+
+[tasks.db-migrate]
+description = "Run database migrations"
+run = "migrate -path migrations/ -database \"$DATABASE_URL\" up"
+
+[tasks.db-down]
+description = "Rollback database migration"
+run = "migrate -path migrations/ -database \"$DATABASE_URL\" down 1"
+
+[tasks.dev]
+description = "Start Echo server"
+run = "go run ./cmd/api"
+
 [env]
 _.file = ".env"
