@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	historyadapter "github.com/Taiga2022/final-task/internal/history/adapter"
 	"github.com/Taiga2022/final-task/internal/shared/db"
 )
 
@@ -17,7 +18,7 @@ func main() {
 	}
 	defer sqlDB.Close()
 
-	if err := run(database); err != nil {
+	if err := run(historyadapter.NewHistoryWriter(database)); err != nil {
 		log.Fatalf("seed database: %v", err)
 	}
 }

@@ -9,9 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	historyadapter "github.com/Taiga2022/final-task/internal/history/adapter"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	historycore "github.com/Taiga2022/final-task/internal/history/core"
 )
 
 const (
@@ -19,29 +17,33 @@ const (
 	batchSize = 1000
 )
 
-var requiredColumns = [...]string{
-	"first_pageview_time",
-	"user_id",
-	"item_type_cat",
-	"watch_flag",
-	"item_target_program_id",
+type historyBatchWriter interface {
+	UpsertHistories([]historycore.ViewingHistory) error
 }
 
-func run(db *gorm.DB) error {
+type csvColumns struct {
+	firstPageviewTime int
+	userID            int
+	itemType          int
+	watchFlag         int
+	targetProgramID   int
+}
+
+func run(writer historyBatchWriter) error {
 	file, err := os.Open(csvPath)
 	if err != nil {
 		return fmt.Errorf("open CSV file: %w", err)
 	}
 	defer file.Close()
 
-	if err := importCSV(db, file); err != nil {
+	if err := importCSV(writer, file); err != nil {
 		return fmt.Errorf("import viewing histories: %w", err)
 	}
 
 	return nil
 }
 
-func importCSV(db *gorm.DB, source io.Reader) error {
+func importCSV(writer historyBatchWriter, source io.Reader) error {
 	reader := csv.NewReader(source)
 
 	header, err := reader.Read()
@@ -57,7 +59,7 @@ func importCSV(db *gorm.DB, source io.Reader) error {
 		return err
 	}
 
-	histories := make([]historyadapter.HistoryModel, 0, batchSize)
+	histories := make([]historycore.ViewingHistory, 0, batchSize)
 	for line := 2; ; line++ {
 		record, err := reader.Read()
 		if errors.Is(err, io.EOF) {
@@ -67,7 +69,7 @@ func importCSV(db *gorm.DB, source io.Reader) error {
 			return fmt.Errorf("read CSV line %d: %w", line, err)
 		}
 
-		if record[columns["watch_flag"]] != "1" || record[columns["item_type_cat"]] != "episode" {
+		if record[columns.watchFlag] != "1" || record[columns.itemType] != "episode" {
 			continue
 		}
 
@@ -78,7 +80,7 @@ func importCSV(db *gorm.DB, source io.Reader) error {
 
 		histories = append(histories, history)
 		if len(histories) == batchSize {
-			if err := insertHistories(db, histories); err != nil {
+			if err := writer.UpsertHistories(histories); err != nil {
 				return fmt.Errorf("insert batch ending at CSV line %d: %w", line, err)
 			}
 			histories = histories[:0]
@@ -86,7 +88,7 @@ func importCSV(db *gorm.DB, source io.Reader) error {
 	}
 
 	if len(histories) > 0 {
-		if err := insertHistories(db, histories); err != nil {
+		if err := writer.UpsertHistories(histories); err != nil {
 			return fmt.Errorf("insert final batch: %w", err)
 		}
 	}
@@ -94,57 +96,56 @@ func importCSV(db *gorm.DB, source io.Reader) error {
 	return nil
 }
 
-func columnIndexes(header []string) (map[string]int, error) {
-	columns := make(map[string]int, len(header))
+func columnIndexes(header []string) (csvColumns, error) {
+	indexes := make(map[string]int, len(header))
 	for index, name := range header {
-		columns[name] = index
+		if _, exists := indexes[name]; exists {
+			return csvColumns{}, fmt.Errorf("CSV column %q is duplicated", name)
+		}
+		indexes[name] = index
 	}
 
-	for _, name := range requiredColumns {
-		if _, ok := columns[name]; !ok {
-			return nil, fmt.Errorf("required CSV column %q is missing", name)
+	required := [...]string{
+		"first_pageview_time",
+		"user_id",
+		"item_type_cat",
+		"watch_flag",
+		"item_target_program_id",
+	}
+	for _, name := range required {
+		if _, ok := indexes[name]; !ok {
+			return csvColumns{}, fmt.Errorf("required CSV column %q is missing", name)
 		}
 	}
 
-	return columns, nil
+	return csvColumns{
+		firstPageviewTime: indexes["first_pageview_time"],
+		userID:            indexes["user_id"],
+		itemType:          indexes["item_type_cat"],
+		watchFlag:         indexes["watch_flag"],
+		targetProgramID:   indexes["item_target_program_id"],
+	}, nil
 }
 
-func historyFromRecord(record []string, columns map[string]int) (historyadapter.HistoryModel, error) {
-	userID := record[columns["user_id"]]
+func historyFromRecord(record []string, columns csvColumns) (historycore.ViewingHistory, error) {
+	userID := record[columns.userID]
 	if userID == "" {
-		return historyadapter.HistoryModel{}, errors.New("user_id is empty")
+		return historycore.ViewingHistory{}, errors.New("user_id is empty")
 	}
 
-	episodeID := record[columns["item_target_program_id"]]
+	episodeID := record[columns.targetProgramID]
 	if episodeID == "" {
-		return historyadapter.HistoryModel{}, errors.New("item_target_program_id is empty")
+		return historycore.ViewingHistory{}, errors.New("item_target_program_id is empty")
 	}
 
-	unixSeconds, err := strconv.ParseInt(record[columns["first_pageview_time"]], 10, 64)
+	unixSeconds, err := strconv.ParseInt(record[columns.firstPageviewTime], 10, 64)
 	if err != nil {
-		return historyadapter.HistoryModel{}, fmt.Errorf("parse first_pageview_time: %w", err)
+		return historycore.ViewingHistory{}, fmt.Errorf("parse first_pageview_time: %w", err)
 	}
 
-	return historyadapter.HistoryModel{
+	return historycore.ViewingHistory{
 		UserID:       userID,
 		EpisodeID:    episodeID,
 		LastViewedAt: time.Unix(unixSeconds, 0),
 	}, nil
-}
-
-func insertHistories(db *gorm.DB, histories []historyadapter.HistoryModel) error {
-	result := db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "user_id"},
-			{Name: "episode_id"},
-		},
-		DoUpdates: clause.Assignments(map[string]any{
-			"last_viewed_at": gorm.Expr("GREATEST(last_viewed_at, VALUES(last_viewed_at))"),
-		}),
-	}).Create(&histories)
-	if result.Error != nil {
-		return fmt.Errorf("upsert viewing histories: %w", result.Error)
-	}
-
-	return nil
 }
