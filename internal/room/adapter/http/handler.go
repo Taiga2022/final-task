@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -31,9 +30,9 @@ func (h *Handler) Create(c *echo.Context) error {
 		return writeError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication is required")
 	}
 
-	request, ok := bindRoomCredentials(c)
-	if !ok {
-		return nil
+	request, err := bindRoomCredentials(c)
+	if err != nil {
+		return handleServiceError(c, err)
 	}
 	roomName, password, err := newRoomCredentials(request)
 	if err != nil {
@@ -54,9 +53,9 @@ func (h *Handler) Join(c *echo.Context) error {
 		return writeError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication is required")
 	}
 
-	request, ok := bindRoomCredentials(c)
-	if !ok {
-		return nil
+	request, err := bindRoomCredentials(c)
+	if err != nil {
+		return handleServiceError(c, err)
 	}
 	roomName, password, err := newRoomCredentials(request)
 	if err != nil {
@@ -87,53 +86,4 @@ func (h *Handler) Leave(c *echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusNoContent)
-}
-
-func bindRoomCredentials(c *echo.Context) (RoomCredentials, bool) {
-	var request RoomCredentials
-	if err := c.Bind(&request); err != nil {
-		_ = writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "request body must be valid JSON")
-		return RoomCredentials{}, false
-	}
-
-	return request, true
-}
-
-func newRoomCredentials(request RoomCredentials) (core.RoomName, core.Password, error) {
-	roomName, err := core.NewRoomName(request.RoomName)
-	if err != nil {
-		return core.RoomName{}, core.Password{}, err
-	}
-	password, err := core.NewPassword(request.Password)
-	if err != nil {
-		return core.RoomName{}, core.Password{}, err
-	}
-	return roomName, password, nil
-}
-
-func writeError(c *echo.Context, status int, code, message string) error {
-	return c.JSON(status, ErrorResponse{Error: ErrorDetail{Code: code, Message: message}})
-}
-
-func newRoomJoinedResponse(room core.JoinedRoom) RoomJoined {
-	return RoomJoined{RoomID: room.RoomID, Status: room.Status}
-}
-
-func handleServiceError(c *echo.Context, err error) error {
-	switch {
-	case errors.Is(err, core.ErrInvalidRoomName):
-		return writeError(c, http.StatusBadRequest, "INVALID_ROOM_NAME", "room_name must contain 1 to 255 characters")
-	case errors.Is(err, core.ErrInvalidPassword):
-		return writeError(c, http.StatusBadRequest, "INVALID_PASSWORD", "password must contain 1 to 72 bytes")
-	case errors.Is(err, core.ErrRoomNameAlreadyExists):
-		return writeError(c, http.StatusConflict, "ROOM_NAME_ALREADY_EXISTS", "room_name is already in use")
-	case errors.Is(err, core.ErrIncorrectPassword):
-		return writeError(c, http.StatusForbidden, "INCORRECT_PASSWORD", "password is incorrect")
-	case errors.Is(err, core.ErrRoomNotFound):
-		return writeError(c, http.StatusNotFound, "ROOM_NOT_FOUND", "room was not found")
-	case errors.Is(err, core.ErrRoomFull):
-		return writeError(c, http.StatusConflict, "ROOM_FULL", "room already has two members")
-	default:
-		return writeError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "an unexpected error occurred")
-	}
 }

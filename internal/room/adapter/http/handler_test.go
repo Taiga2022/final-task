@@ -23,6 +23,7 @@ type roomServiceStub struct {
 	leftUserID    string
 	leftRoomID    string
 	joinErr       error
+	leaveErr      error
 }
 
 func (s *roomServiceStub) Create(_ context.Context, userID string, _ core.RoomName, _ core.Password) (core.JoinedRoom, error) {
@@ -57,7 +58,59 @@ func TestJoinMapsDomainError(t *testing.T) {
 func (s *roomServiceStub) Leave(_ context.Context, userID, roomID string) error {
 	s.leftUserID = userID
 	s.leftRoomID = roomID
-	return nil
+	return s.leaveErr
+}
+
+func TestRoomRequestFormats(t *testing.T) {
+	for _, path := range []string{"/rooms", "/rooms/join"} {
+		for _, tc := range []struct {
+			name, contentType, body string
+			status                  int
+			code                    string
+		}{
+			{"plain text", "text/plain", "hello", http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE"},
+			{"XML", "application/xml", "<RoomCredentials><RoomName>movie</RoomName><Password>secret</Password></RoomCredentials>", http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE"},
+			{"form", "application/x-www-form-urlencoded", "room_name=movie&password=secret", http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE"},
+			{"missing content type", "", "{}", http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE"},
+			{"broken JSON", "application/json", "{", http.StatusBadRequest, "INVALID_REQUEST"},
+			{"JSON with charset", "application/json; charset=utf-8", `{"room_name":"movie","password":"secret"}`, 0, ""},
+			{"UTF8 byte limit", "application/json", `{"room_name":"movie","password":"` + strings.Repeat("あ", 25) + `"}`, http.StatusBadRequest, "INVALID_PASSWORD"},
+			{"UTF8 boundary", "application/json", `{"room_name":"movie","password":"` + strings.Repeat("あ", 24) + `"}`, 0, ""},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				e := newTestServer(&roomServiceStub{})
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(tc.body))
+				req.Header.Set(echo.HeaderContentType, tc.contentType)
+				req.Header.Set(auth.HeaderUserID, "user-1")
+				recorder := httptest.NewRecorder()
+				e.ServeHTTP(recorder, req)
+				status := tc.status
+				if status == 0 {
+					status = http.StatusOK
+					if path == "/rooms" {
+						status = http.StatusCreated
+					}
+				}
+				if recorder.Code != status {
+					t.Fatalf("status = %d, want %d; body = %s", recorder.Code, status, recorder.Body.String())
+				}
+				if tc.code != "" && !strings.Contains(recorder.Body.String(), tc.code) {
+					t.Fatalf("body = %s", recorder.Body.String())
+				}
+			})
+		}
+	}
+}
+
+func TestLeaveNonmemberReturnsNotFound(t *testing.T) {
+	e := newTestServer(&roomServiceStub{leaveErr: core.ErrRoomNotFound})
+	req := httptest.NewRequest(http.MethodDelete, "/rooms/room-1/membership", nil)
+	req.Header.Set(auth.HeaderUserID, "outsider")
+	recorder := httptest.NewRecorder()
+	e.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), "ROOM_NOT_FOUND") {
+		t.Fatalf("status = %d; body = %s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func newTestServer(service RoomService) *echo.Echo {

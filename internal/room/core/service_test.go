@@ -43,7 +43,7 @@ func TestCreateHashesPasswordAndJoinsOwner(t *testing.T) {
 	repository := &repositoryStub{}
 	roomName, _ := NewRoomName("movie night")
 	password, _ := NewPassword("secret")
-	result, err := NewService(repository).Create(context.Background(), "user-1", roomName, password)
+	result, err := NewService(repository).Create(t.Context(), "user-1", roomName, password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestJoinRejectsIncorrectPassword(t *testing.T) {
 	repository := &repositoryStub{room: Room{ID: "room-1", PasswordHash: hash}}
 	wrongPassword, _ := NewPassword("wrong")
 
-	_, err = NewService(repository).Join(context.Background(), "user-2", roomName, wrongPassword)
+	_, err = NewService(repository).Join(t.Context(), "user-2", roomName, wrongPassword)
 	if !errors.Is(err, ErrIncorrectPassword) {
 		t.Fatalf("error = %v, want ErrIncorrectPassword", err)
 	}
@@ -87,7 +87,7 @@ func TestJoinReturnsReadyForTwoMembers(t *testing.T) {
 		joinCount: 2,
 	}
 
-	result, err := NewService(repository).Join(context.Background(), "user-2", roomName, password)
+	result, err := NewService(repository).Join(t.Context(), "user-2", roomName, password)
 	if err != nil {
 		t.Fatal(err)
 	}

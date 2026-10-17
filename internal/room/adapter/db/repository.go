@@ -75,8 +75,8 @@ func (r *Repository) Join(ctx context.Context, roomID, userID string) (int64, er
 			if err := tx.Model(&roomMemberModel{}).Where("room_id = ?", roomID).Count(&count).Error; err != nil {
 				return err
 			}
-			if count >= 2 {
-				return core.ErrRoomFull
+			if err := (core.Room{MemberCount: count}).CanJoin(); err != nil {
+				return err
 			}
 			if err := tx.Create(&roomMemberModel{RoomID: roomID, UserID: userID}).Error; err != nil {
 				return err
@@ -95,15 +95,33 @@ func (r *Repository) Join(ctx context.Context, roomID, userID string) (int64, er
 
 func (r *Repository) Leave(ctx context.Context, roomID, userID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&roomModel{}).Where("id = ?", roomID).Count(&count).Error; err != nil {
+		var room roomModel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", roomID).First(&room).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return core.ErrRoomNotFound
+			}
 			return fmt.Errorf("check room: %w", err)
 		}
-		if count == 0 {
+		result := tx.Where("room_id = ? AND user_id = ?", roomID, userID).Delete(&roomMemberModel{})
+		if result.Error != nil {
+			return fmt.Errorf("leave room: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
 			return core.ErrRoomNotFound
 		}
-		if err := tx.Where("room_id = ? AND user_id = ?", roomID, userID).Delete(&roomMemberModel{}).Error; err != nil {
-			return fmt.Errorf("leave room: %w", err)
+		var remaining []roomMemberModel
+		if err := tx.Where("room_id = ?", roomID).Order("user_id").Find(&remaining).Error; err != nil {
+			return fmt.Errorf("find remaining members: %w", err)
+		}
+		if len(remaining) == 0 {
+			if err := tx.Where("id = ?", roomID).Delete(&roomModel{}).Error; err != nil {
+				return fmt.Errorf("delete empty room: %w", err)
+			}
+		} else if room.OwnerUserID == userID {
+			if err := tx.Model(&roomModel{}).Where("id = ?", roomID).
+				Updates(map[string]any{"owner_user_id": remaining[0].UserID, "weight": 0.5}).Error; err != nil {
+				return fmt.Errorf("transfer room ownership: %w", err)
+			}
 		}
 		return nil
 	})

@@ -340,6 +340,7 @@ components:
         password:
           type: string
           format: password
+          description: UTF-8で1〜72バイト。文字数が72以内でも、UTF-8で72バイトを超える場合はINVALID_PASSWORD。
           minLength: 1
           maxLength: 72
     RoomJoined:
