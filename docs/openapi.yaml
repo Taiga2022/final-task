@@ -8,7 +8,7 @@ info:
 servers:
 - url: "/"
 security:
-- sessionAuth: []
+- userIdHeader: []
 paths:
   "/rooms":
     post:
@@ -33,7 +33,7 @@ paths:
           "$ref": "#/components/responses/Error409"
         '415':
           "$ref": "#/components/responses/Error415"
-      description: ユーザーはログインセッションから取得する。同名ルームは409 ROOM_NAME_ALREADY_EXISTS。
+      description: ユーザーはX-User-IDヘッダーから取得する。同名ルームは409 ROOM_NAME_ALREADY_EXISTS。
       requestBody:
         required: true
         content:
@@ -125,6 +125,16 @@ paths:
         in: query
         schema:
           type: string
+  "/rooms/{room_id}/viewing-history":
+    parameters:
+    - name: room_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+      description: URLのパス要素としてパーセントエンコードする。
     put:
       operationId: submitViewingHistory
       summary: 自分の推薦入力を全件置換する
@@ -157,8 +167,7 @@ paths:
           "$ref": "#/components/responses/Error415"
         '422':
           "$ref": "#/components/responses/Error422"
-      description: user_idはログインユーザー自身のみ。他者を指定した場合は404 ROOM_NOT_FOUND。空配列は入力不足としてready=falseに戻す。計算中は409
-        RECOMMENDATION_IN_PROGRESS。同じ選択の再送は再計算しない。 ただしfailed状態では同じ選択の再送も再試行する。
+      description: X-User-IDで識別した本人の入力を更新する。空配列は入力不足としてready=falseに戻す。計算中は409 RECOMMENDATION_IN_PROGRESS。同じ選択の再送は再計算しない。ただしfailed状態では同じ選択の再送も再試行する。
       requestBody:
         required: true
         content:
@@ -207,17 +216,9 @@ paths:
           application/json:
             schema:
               "$ref": "#/components/schemas/Preference"
-  "/rooms/{room_id}/members/{user_id}":
+  "/rooms/{room_id}/membership":
     parameters:
     - name: room_id
-      in: path
-      required: true
-      schema:
-        type: string
-        minLength: 1
-        maxLength: 64
-      description: URLのパス要素としてパーセントエンコードする。
-    - name: user_id
       in: path
       required: true
       schema:
@@ -264,18 +265,18 @@ paths:
           "$ref": "#/components/responses/Error500"
         '404':
           "$ref": "#/components/responses/Error404"
-      description: ログインセッションで認証する。接続直後にroom.updatedを送信し、completed/failedなら最新結果/失敗情報も送信する。切断中のイベントは再送しない。業務メッセージはHTTPで送信する。
+      description: WebSocketハンドシェイク時のX-User-IDヘッダーでユーザーを識別する。接続直後にroom.updatedを送信し、completed/failedなら最新結果/失敗情報も送信する。切断中のイベントは再送しない。業務メッセージはHTTPで送信する。この方式は任意のユーザーIDを名乗れる開発・課題用の簡易方式であり、本番環境では使用しない。
     x-websocket-events:
     - "$ref": "#/components/schemas/RoomUpdatedEvent"
     - "$ref": "#/components/schemas/RecommendationCompletedEvent"
     - "$ref": "#/components/schemas/RecommendationFailedEvent"
 components:
   securitySchemes:
-    sessionAuth:
+    userIdHeader:
       type: apiKey
-      in: cookie
-      name: session
-      description: 既存ログインセッションを利用する案。Cookie名・ログイン方式は未確定。
+      in: header
+      name: X-User-ID
+      description: 開発・課題用の簡易ユーザー識別。既存userテーブルに存在するユーザーIDを指定する。本人確認を行わないため、本番環境ではセッションまたは署名付きトークンに置き換える。
   schemas:
     Error:
       type: object
@@ -335,10 +336,12 @@ components:
         room_name:
           type: string
           minLength: 1
+          maxLength: 255
         password:
           type: string
           format: password
           minLength: 1
+          maxLength: 72
     RoomJoined:
       type: object
       required:
@@ -512,7 +515,7 @@ components:
           schema:
             "$ref": "#/components/schemas/Error"
     Error401:
-      description: UNAUTHENTICATED：ログインセッションが無効。
+      description: UNAUTHENTICATED：X-User-IDが未指定、空、または既存userテーブルに存在しない。
       content:
         application/json:
           schema:
