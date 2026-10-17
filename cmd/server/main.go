@@ -21,7 +21,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("get database connection: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() {
+		if err := sqlDB.Close(); err != nil {
+			log.Printf("close database connection: %v", err)
+		}
+	}()
 
 	e := echo.New()
 	authentication := auth.NewMiddleware(auth.NewGORMUserStore(database))

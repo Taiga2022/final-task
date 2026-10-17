@@ -1,4 +1,4 @@
-package adapter
+package db
 
 import (
 	"fmt"
@@ -17,9 +17,9 @@ func NewHistoryWriter(db *gorm.DB) *HistoryWriter {
 }
 
 func (writer *HistoryWriter) UpsertHistories(histories []historycore.ViewingHistory) error {
-	models := make([]HistoryModel, len(histories))
+	models := make([]historyModel, len(histories))
 	for index, history := range histories {
-		models[index] = HistoryModel{
+		models[index] = historyModel{
 			UserID:       history.UserID,
 			EpisodeID:    history.EpisodeID,
 			LastViewedAt: history.LastViewedAt,

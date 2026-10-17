@@ -29,12 +29,16 @@ type csvColumns struct {
 	targetProgramID   int
 }
 
-func run(writer historyBatchWriter) error {
+func run(writer historyBatchWriter) (returnErr error) {
 	file, err := os.Open(csvPath)
 	if err != nil {
 		return fmt.Errorf("open CSV file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close CSV file: %w", err))
+		}
+	}()
 
 	if err := importCSV(writer, file); err != nil {
 		return fmt.Errorf("import viewing histories: %w", err)
