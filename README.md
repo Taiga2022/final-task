@@ -13,8 +13,6 @@ DB接続設定は `.env.example` を参照して環境変数へ設定します�
 ```sh
 mise install
 ```
-```
-```
 
 ## DB起動
 以下のコマンドでdockerを使ってDBを起動できます。
