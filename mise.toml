@@ -20,7 +20,7 @@ run = "go run ./cmd/seed"
 
 [tasks.dev]
 description = "Start Echo server"
-run = "go run ./cmd/api"
+run = "go run ./cmd/server/"
 
 [env]
 _.file = ".env"

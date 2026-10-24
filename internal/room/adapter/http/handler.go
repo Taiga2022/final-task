@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Taiga2022/final-task/internal/room/core"
+	"github.com/Taiga2022/final-task/internal/shared/api"
 	"github.com/Taiga2022/final-task/internal/shared/auth"
 	"github.com/labstack/echo/v5"
 )
@@ -76,7 +77,7 @@ func (h *Handler) Leave(c *echo.Context) error {
 		return writeError(c, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication is required")
 	}
 
-	roomID := strings.TrimSpace(c.Param("room_id"))
+	roomID := strings.TrimSpace(api.PathParam(c, "room_id"))
 	if roomID == "" {
 		return writeError(c, http.StatusBadRequest, "INVALID_REQUEST", "room_id is required")
 	}

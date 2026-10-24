@@ -112,7 +112,7 @@ paths:
           "$ref": "#/components/responses/Error400"
         '404':
           "$ref": "#/components/responses/Error404"
-      description: 参加者は双方の履歴を取得できる。カーソルはルーム・対象ユーザーにひも付く不透明な値。末尾はnext_cursor=null、has_more=false。
+      description: 参加者は双方の履歴を取得できる。カーソルは前ページ末尾の番組IDをBase64 URL形式で表した値。末尾はnext_cursor=null、has_more=false。
       parameters:
       - name: limit
         in: query
@@ -142,7 +142,7 @@ paths:
       - Recommendations
       responses:
         '200':
-          description: 相手の送信待ち。
+          description: 相手の送信待ち、または完了済みの同じ選択の再送（再計算なし）。
           content:
             application/json:
               schema:
@@ -208,7 +208,7 @@ paths:
           "$ref": "#/components/responses/Error409"
         '415':
           "$ref": "#/components/responses/Error415"
-      description: weightは作成者への重み。0は相手寄り、1は作成者寄り。範囲外は400 INVALID_WEIGHT。二人未参加は409
+      description: weightは作成者への重み。0は相手寄り、1は作成者寄り。小数第4位に丸めて保存・返却する。範囲外は400 INVALID_WEIGHT。二人未参加は409
         ROOM_NOT_READY。計算中は409 RECOMMENDATION_IN_PROGRESS。二人ともreadyなら再計算する。
       requestBody:
         required: true
@@ -327,6 +327,7 @@ components:
           enum:
           - waiting_for_partner
           - processing
+          - completed
     RoomCredentials:
       type: object
       required:

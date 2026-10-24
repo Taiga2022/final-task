@@ -7,10 +7,15 @@ import (
 
 type Service struct {
 	repository Repository
+	lifecycle  MembershipLifecycle
 }
 
 func NewService(repository Repository) *Service {
 	return &Service{repository: repository}
+}
+
+func NewLiveService(repository Repository, lifecycle MembershipLifecycle) *Service {
+	return &Service{repository: repository, lifecycle: lifecycle}
 }
 
 func (s *Service) Create(ctx context.Context, userID string, roomName RoomName, password Password) (JoinedRoom, error) {
@@ -53,7 +58,12 @@ func (s *Service) Join(ctx context.Context, userID string, roomName RoomName, pa
 		return JoinedRoom{}, ErrIncorrectPassword
 	}
 
-	memberCount, err := s.repository.Join(ctx, room.ID, userID)
+	var memberCount int64
+	err = s.changeMembership(ctx, room.ID, userID, true, func() error {
+		var joinErr error
+		memberCount, joinErr = s.repository.Join(ctx, room.ID, userID)
+		return joinErr
+	})
 	if err != nil {
 		return JoinedRoom{}, err
 	}
@@ -65,5 +75,14 @@ func (s *Service) Join(ctx context.Context, userID string, roomName RoomName, pa
 }
 
 func (s *Service) Leave(ctx context.Context, userID, roomID string) error {
-	return s.repository.Leave(ctx, roomID, userID)
+	return s.changeMembership(ctx, roomID, userID, false, func() error {
+		return s.repository.Leave(ctx, roomID, userID)
+	})
+}
+
+func (s *Service) changeMembership(ctx context.Context, roomID, userID string, joining bool, change func() error) error {
+	if s.lifecycle == nil {
+		return change()
+	}
+	return s.lifecycle.ChangeMembership(ctx, roomID, userID, joining, change)
 }
